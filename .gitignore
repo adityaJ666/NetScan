@@ -14,7 +14,7 @@ env/
 
 data/scan_history.json
 
-netscan_report.txt
+netscan_report_*.txt
 *.tmp
 
 .DS_Store
