@@ -1,14 +1,60 @@
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class PortScanner:
 
-    def __init__(self, target, start_port=1, end_port=1024):
-
+    def __init__(
+        self,
+        target,
+        start_port=1,
+        end_port=1024,
+        timeout=0.2,
+        max_workers=100
+    ):
         self.target = target
         self.start_port = start_port
         self.end_port = end_port
+        self.timeout = timeout
+        self.max_workers = max_workers
+
+    def scan_port(self, ip_address, port):
+        sock = socket.socket(
+            socket.AF_INET,
+            socket.SOCK_STREAM
+        )
+
+        sock.settimeout(self.timeout)
+
+        try:
+            connection = sock.connect_ex(
+                (ip_address, port)
+            )
+
+            if connection == 0:
+
+                try:
+                    service = socket.getservbyport(
+                        port,
+                        "tcp"
+                    )
+                except OSError:
+                    service = "unknown"
+
+                return {
+                    "port": port,
+                    "state": "Open",
+                    "service": service
+                }
+
+        except (socket.timeout, OSError):
+            pass
+
+        finally:
+            sock.close()
+
+        return None
 
     def scan(self):
 
@@ -21,46 +67,36 @@ class PortScanner:
 
         results = []
 
-        for port in range(
+        ports = range(
             self.start_port,
             self.end_port + 1
-        ):
+        )
 
-            sock = socket.socket(
-                socket.AF_INET,
-                socket.SOCK_STREAM
-            )
+        # Scan multiple ports concurrently
+        with ThreadPoolExecutor(
+            max_workers=self.max_workers
+        ) as executor:
 
-            sock.settimeout(0.2)
+            futures = {
+                executor.submit(
+                    self.scan_port,
+                    ip_address,
+                    port
+                ): port
+                for port in ports
+            }
 
-            try:
+            for future in as_completed(futures):
 
-                connection = sock.connect_ex(
-                    (ip_address, port)
-                )
+                result = future.result()
 
-                if connection == 0:
+                if result is not None:
+                    results.append(result)
 
-                    try:
-                        service = socket.getservbyport(
-                            port,
-                            "tcp"
-                        )
-
-                    except OSError:
-                        service = "unknown"
-
-                    results.append(
-                        {
-                            "port": port,
-                            "state": "Open",
-                            "service": service
-                        }
-                    )
-
-            finally:
-
-                sock.close()
+        # Keep results ordered by port number
+        results.sort(
+            key=lambda item: item["port"]
+        )
 
         end_time = time.time()
 
@@ -75,9 +111,7 @@ class PortScanner:
             1
         )
 
-        open_ports = len(
-            results
-        )
+        open_ports = len(results)
 
         return {
             "target": self.target,
